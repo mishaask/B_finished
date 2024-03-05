@@ -15,5 +15,6 @@ int rudp_socket(int type, int port, char *ip);
 int rudp_send(int client_socket, FILE *file, int port, char *ip);
 int rudp_recv(int sockfd, char *buffer, int len, struct sockaddr_in *src_addr);
 int rudp_close(int sockfd);
+uint16_t calculate_checksum(char *data, size_t size);
 
 #endif /* RUDP_H */

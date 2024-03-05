@@ -52,7 +52,6 @@ int main(int argc, char *argv[]){
     int file_size = FILE_SIZE; // Specify the size of the file in bytes
     generateRandomFile(filename, file_size);
 
-   // int sender_socket = rudp_socket(1,dest_addr.sin_port ,dest_addr.sin_addr.s_addr);
     int sender_socket = rudp_socket(1,port,ip);
     if (sender_socket < 0) {
         exit(EXIT_FAILURE);
@@ -99,12 +98,6 @@ int main(int argc, char *argv[]){
             }
 
             printf("\nuser chose %d\n",User_Decision);
-        //send the decision.
-        //     struct sockaddr_in dest_addr;
-        // memset(&dest_addr, 0, sizeof(dest_addr));
-        // dest_addr.sin_family = AF_INET;
-        // dest_addr.sin_port = htons(port);
-        // inet_pton(AF_INET, ip, &dest_addr.sin_addr);
 
         //send the decision.
         sendto(sender_socket, User_Decision_MSG, sizeof(User_Decision_MSG), 0, (struct sockaddr *)&reciever_addr, sizeof(reciever_addr));
@@ -114,6 +107,7 @@ int main(int argc, char *argv[]){
         }
 
         if (User_Decision==0){
+            sendto(sender_socket, "EXIT", sizeof("EXIT"), 0, (struct sockaddr *)&reciever_addr, sizeof(reciever_addr));
             break;
         }
         j++;

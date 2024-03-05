@@ -16,6 +16,14 @@
 #define TRANSMITION_TRIES 4
 
 
+// Define a struct for the packet header
+typedef struct {
+    int seq_num;
+    int packet_size;
+    uint16_t checksum;
+    char data[BUFFER_SIZE];
+} PacketHeader;
+
 int rudp_socket(int type, int port, char *ip) {//type == 1 ->sender || type == 2 -> reciever
 if(type == 1){//SENDER
     struct timeval tv = { 2, 0 };
@@ -28,7 +36,7 @@ if(type == 1){//SENDER
 
     struct sockaddr_in reciever_address;
     socklen_t length = sizeof(reciever_address);
-    memset(&reciever_address,0,sizeof(reciever_address));//update
+    memset(&reciever_address,0,sizeof(reciever_address));
     reciever_address.sin_family = AF_INET;
     reciever_address.sin_port=htons(port);
 
@@ -75,13 +83,10 @@ else if (type == 2)//RECIEVER
 
     char buffer[3] = {0};  
 
-    // The  memset()  function  fills  the  first  n  bytes of the memory area
-    //       pointed to by s with the constant byte c.
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
     server_addr.sin_addr.s_addr = INADDR_ANY;
-    server_addr.sin_port = htons(port); // short, network byte order
-
+    server_addr.sin_port = htons(port);
 
     // Create a UDP socket
     int sockfd = -1;
@@ -91,12 +96,6 @@ else if (type == 2)//RECIEVER
         return -1;
     }
 
-    /*When a socket is created with socket(2), it exists in a name space (ad‐
-       dress family) but has no address assigned to it.   bind()  assigns  the
-       address  specified  by  addr  to the socket referred to by the file de‐
-       scriptor sockfd.  addrlen specifies the size, in bytes, of the  address
-       structure  pointed to by addr.  Traditionally, this operation is called
-       “assigning a name to a socket”.*/
     // connect the server to a port which can read and write on.
     if(bind(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
         printf("Bind failed with error code : %d" , errno);
@@ -132,7 +131,7 @@ int rudp_send(int client_socket, FILE *file, int port, char *ip) {
     char buffer[BUFFER_SIZE];
     int ack = 0;
     int retries = 0;
-    int total_bytes_sent = 0;  // Variable to keep track of total bytes sent
+    int total_bytes_sent = 0;
 
     struct sockaddr_in dest_addr;
     socklen_t length = sizeof(dest_addr);
@@ -141,7 +140,7 @@ int rudp_send(int client_socket, FILE *file, int port, char *ip) {
     dest_addr.sin_port = htons(port);
     inet_pton(AF_INET, ip, &dest_addr.sin_addr);
 
-    while (ack == 0 && retries < TRANSMITION_TRIES) {//while (ack == 0 && retries < TRANSMITION_TRIES) {
+    while (ack == 0 && retries < TRANSMITION_TRIES) {
         size_t bytes_read = fread(buffer, 1, sizeof(buffer), file);
         if (bytes_read == 0) {
             if (feof(file)) {
@@ -152,17 +151,25 @@ int rudp_send(int client_socket, FILE *file, int port, char *ip) {
             return total_bytes_sent;  // Return total bytes sent so far
         }
 
-        ssize_t bytes_sent = sendto(client_socket, buffer, bytes_read, 0, (struct sockaddr *)&dest_addr, length);
+        // Create a packet header
+        PacketHeader header;
+        header.seq_num = retries;
+        header.packet_size = bytes_read;
+
+        // Calculate checksum
+        header.checksum = calculate_checksum(buffer, bytes_read);
+        
+        // Copy data to header
+        memcpy(header.data, buffer, bytes_read);
+        ssize_t bytes_sent = sendto(client_socket, (char *)&header, sizeof(PacketHeader), 0, (struct sockaddr *)&dest_addr, length);
         if (bytes_sent < 0 && retries >= TRANSMISSION_TRIES) {
             perror("Sendto failed");
             exit(EXIT_FAILURE);
-            //return total_bytes_sent;  // Return total bytes sent so far
         }
 
         total_bytes_sent += bytes_sent;  // Update total bytes sent
 
         // Receive ACK from sender
-        //socklen_t dest_addr_len = sizeof(dest_addr);
         char ack_buffer[3] = {0};
         recvfrom(client_socket, ack_buffer, sizeof(ack_buffer), 0, (struct sockaddr *)&dest_addr, &length);
 
@@ -170,7 +177,7 @@ int rudp_send(int client_socket, FILE *file, int port, char *ip) {
             printf("Received ACK from sender. Sending ACK...\n");
             printf("Message sent\n");
             ack = 1;
-            return total_bytes_sent;  // Return total bytes sent so far
+            return total_bytes_sent; 
         }
 
         if (total_bytes_sent < 0)
@@ -179,34 +186,48 @@ int rudp_send(int client_socket, FILE *file, int port, char *ip) {
 
     if (ack == 0) {
         perror("No acknowledgment received");
-        return total_bytes_sent;  // Return total bytes sent so far
+        return total_bytes_sent; 
     }
 
-    return total_bytes_sent;  // Return total bytes sent
+    return total_bytes_sent; 
 }
 
 
 int rudp_recv(int sockfd, char *buffer, int len, struct sockaddr_in *src_addr){
 
+    PacketHeader header;
     socklen_t addr_len = sizeof(*src_addr);
 
-    // Receive data using recvfrom() function
-    int bytes_received = recvfrom(sockfd, buffer, len, 0, (struct sockaddr *)src_addr, &addr_len);
+    // Receive data
+    int bytes_received = recvfrom(sockfd, (char *)&header, sizeof(PacketHeader), 0, (struct sockaddr *)src_addr, &addr_len);
     if (bytes_received < 0) {
         perror("recvfrom failed");
         return -1;
     }
-    if(strcmp(buffer,"EXIT") == 0){//|| strcmp(buffer,"0") == 0){
+
+    if(strcmp(buffer,"EXIT") == 0){
         int i =rudp_close(sockfd);
         if (i<0)
         exit(EXIT_FAILURE);
         return -1;
     }
+
+    // Verify checksum
+    uint16_t checksum = calculate_checksum(header.data, header.packet_size);
+    if (checksum != header.checksum) {
+        printf("Checksum verification failed. Packet ignored.\n");
+        return -1;
+    }
+
+
+    // Copy data from header to buffer
+    memcpy(buffer, header.data, header.packet_size);
+
     // Acknowledge receipt of the packet
     char ack_packet[] = "ACK";
     sendto(sockfd, ack_packet, sizeof(ack_packet), 0, (struct sockaddr *)src_addr, addr_len);
 
-    return bytes_received;
+    return header.packet_size;
 }
 
 int rudp_close(int sockfd) {
@@ -223,4 +244,13 @@ int rudp_close(int sockfd) {
     }
     printf("socket closed\n");
     return 0;
+}
+
+// Function to calculate checksum
+uint16_t calculate_checksum(char *data, size_t size) {
+    uint16_t checksum = 0;
+    for (int i = 0; i < size; i++) {
+        checksum += data[i];
+    }
+    return checksum;
 }
